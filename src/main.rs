@@ -1,34 +1,9 @@
-use clap::{Parser, Subcommand};
-use tide::utils::After;
-use tide::{Next, Request};
+mod cli;
+mod middleware;
 
-#[derive(Debug, Clone)]
-struct Logger;
-
-#[async_trait::async_trait]
-impl<State: Clone + Send + Sync + 'static> tide::Middleware<State> for Logger {
-    async fn handle(&self, req: Request<State>, next: Next<'_, State>) -> tide::Result {
-        let response = next.run(req).await;
-        println!("被调用了");
-        Ok(response)
-    }
-}
-
-#[derive(Parser)]
-#[command(author, version, about, long_about = None)]
-struct Cli {
-    #[command(subcommand)]
-    command: Commands,
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    /// 启动开发服务器
-    Dev {
-        #[arg(short, long, default_value = "127.0.0.1:8080")]
-        port: String,
-    },
-}
+use clap::Parser;
+use cli::{Cli, Commands};
+use middleware::Logger;
 
 async fn start_server(url: &str) {
     let mut app = tide::new();
