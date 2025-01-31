@@ -12,3 +12,5 @@ tide = "0.16"
 async-std = { version = "1.10", features = ["attributes"] }
 async-trait = "0.1"
 clap = { version = "4.5", features = ["derive"] }
+serde_yaml = "0.9.34"
+serde = { version = "1.0", features = ["derive"] }
