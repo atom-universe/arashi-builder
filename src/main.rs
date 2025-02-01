@@ -4,7 +4,7 @@ mod utils;
 
 use clap::Parser;
 use cli::{Cli, Commands};
-use middleware::{DependencyAnalysis, Logger, StaticFiles};
+use middleware::{DependencyAnalysis, Logger, StaticFiles, TypescriptTransform};
 use utils::fs;
 
 async fn start_server(url: &str) {
@@ -12,6 +12,7 @@ async fn start_server(url: &str) {
     let working_dir = fs::get_current_dir().unwrap().to_string_lossy().to_string();
 
     app.with(DependencyAnalysis::new(working_dir.clone()));
+    app.with(TypescriptTransform::new(working_dir.clone()));
     app.with(StaticFiles::new(working_dir));
 
     println!(

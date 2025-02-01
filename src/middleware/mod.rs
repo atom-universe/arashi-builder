@@ -1,8 +1,9 @@
 use crate::utils::fs;
+use crate::utils::transform::transform_typescript;
 use serde_yaml;
 use std::collections::HashMap;
 use std::path::Path;
-use tide::{Next, Request, Response, StatusCode};
+use tide::{Next, Request, Response, Status, StatusCode};
 
 #[derive(Debug, Clone)]
 pub struct Logger;
@@ -27,16 +28,6 @@ impl DependencyAnalysis {
     }
 }
 
-pub struct Transform {
-    pub file_path: String,
-}
-
-impl Transform {
-    pub fn new(file_path: String) -> Self {
-        Transform { file_path }
-    }
-}
-
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PnpmLock {
@@ -58,14 +49,6 @@ struct Resolution {
 }
 
 #[async_trait::async_trait]
-impl<State: Clone + Send + Sync + 'static> tide::Middleware<State> for Transform {
-    async fn handle(&self, req: Request<State>, next: Next<'_, State>) -> tide::Result {
-        let content = fs::read_file_content(&self.file_path).unwrap();
-        Ok(Response::builder(200).body(content).build())
-    }
-}
-
-#[async_trait::async_trait]
 impl<State: Clone + Send + Sync + 'static> tide::Middleware<State> for DependencyAnalysis {
     async fn handle(&self, req: Request<State>, next: Next<'_, State>) -> tide::Result {
         let mut pkg_name_2_pkg_path = HashMap::<String, String>::new();
@@ -80,7 +63,7 @@ impl<State: Clone + Send + Sync + 'static> tide::Middleware<State> for Dependenc
         for (package_name, _) in lock.packages {
             // println!("Package: {}", package_name);
             let module_name = package_name.split('@').collect::<Vec<&str>>()[0];
-            println!("package_name/module_name: {}/{}", package_name, module_name);
+            // println!("package_name/module_name: {}/{}", package_name, module_name);
             let subpath = format!(
                 "node_modules/.pnpm/{}/node_modules/{}",
                 package_name, module_name
@@ -126,6 +109,8 @@ impl<State: Clone + Send + Sync + 'static> tide::Middleware<State> for StaticFil
             }
         }
 
+        // println!("\nfile_path: {:?}\n", file_path);
+
         if let Some(path) = file_path {
             let mime_type = mime_guess::from_path(&path)
                 .first_or_octet_stream()
@@ -137,6 +122,44 @@ impl<State: Clone + Send + Sync + 'static> tide::Middleware<State> for StaticFil
             Ok(res)
         } else {
             Ok(Response::new(StatusCode::NotFound))
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TypescriptTransform {
+    pub root_dir: String,
+}
+
+impl TypescriptTransform {
+    pub fn new(root_dir: String) -> Self {
+        TypescriptTransform { root_dir }
+    }
+
+    fn is_typescript_file(&self, path: &str) -> bool {
+        path.ends_with(".ts") || path.ends_with(".tsx")
+    }
+}
+
+#[async_trait::async_trait]
+impl<State: Clone + Send + Sync + 'static> tide::Middleware<State> for TypescriptTransform {
+    async fn handle(&self, req: Request<State>, next: Next<'_, State>) -> tide::Result {
+        let path = req.url().path();
+
+        if self.is_typescript_file(path) {
+            let file_path = Path::new(&self.root_dir).join(path.trim_start_matches('/'));
+            let content = fs::read_file_content(&file_path).unwrap();
+
+            let is_tsx = path.ends_with(".tsx");
+            let transformed_content = transform_typescript(&content, is_tsx);
+            println!("\ntransformed_content: {:?}\n", transformed_content);
+
+            let mut res = Response::new(StatusCode::Ok);
+            res.set_content_type("application/javascript");
+            res.set_body(transformed_content);
+            Ok(res)
+        } else {
+            Ok(next.run(req).await)
         }
     }
 }
