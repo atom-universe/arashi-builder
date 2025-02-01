@@ -1,7 +1,8 @@
 use crate::utils::fs;
 use serde_yaml;
 use std::collections::HashMap;
-use tide::{Next, Request};
+use std::path::Path;
+use tide::{Next, Request, Response, StatusCode};
 
 #[derive(Debug, Clone)]
 pub struct Logger;
@@ -26,6 +27,16 @@ impl DependencyAnalysis {
     }
 }
 
+pub struct Transform {
+    pub file_path: String,
+}
+
+impl Transform {
+    pub fn new(file_path: String) -> Self {
+        Transform { file_path }
+    }
+}
+
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PnpmLock {
@@ -47,9 +58,16 @@ struct Resolution {
 }
 
 #[async_trait::async_trait]
+impl<State: Clone + Send + Sync + 'static> tide::Middleware<State> for Transform {
+    async fn handle(&self, req: Request<State>, next: Next<'_, State>) -> tide::Result {
+        let content = fs::read_file_content(&self.file_path).unwrap();
+        Ok(Response::builder(200).body(content).build())
+    }
+}
+
+#[async_trait::async_trait]
 impl<State: Clone + Send + Sync + 'static> tide::Middleware<State> for DependencyAnalysis {
     async fn handle(&self, req: Request<State>, next: Next<'_, State>) -> tide::Result {
-        println!("也被调用了！{}", &self.working_dir);
         let mut pkg_name_2_pkg_path = HashMap::<String, String>::new();
         let path_string = std::path::Path::new(&self.working_dir)
             .join("pnpm-lock.yaml")
@@ -59,11 +77,10 @@ impl<State: Clone + Send + Sync + 'static> tide::Middleware<State> for Dependenc
         let content = fs::read_file_content(&path_string).unwrap().to_string();
         let lock: PnpmLock = serde_yaml::from_str(&content).unwrap();
 
-        // 打印所有包名
         for (package_name, _) in lock.packages {
-            println!("Package: {}", package_name);
+            // println!("Package: {}", package_name);
             let module_name = package_name.split('@').collect::<Vec<&str>>()[0];
-            println!("module_name: {}", module_name);
+            println!("package_name/module_name: {}/{}", package_name, module_name);
             let subpath = format!(
                 "node_modules/.pnpm/{}/node_modules/{}",
                 package_name, module_name
@@ -73,9 +90,53 @@ impl<State: Clone + Send + Sync + 'static> tide::Middleware<State> for Dependenc
             pkg_name_2_pkg_path.insert(package_name, pkg_path.to_string_lossy().to_string());
         }
 
-        println!("{:?}", pkg_name_2_pkg_path);
-
         let response = next.run(req).await;
         Ok(response)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct StaticFiles {
+    pub root_dir: String,
+}
+
+impl StaticFiles {
+    pub fn new(root_dir: String) -> Self {
+        StaticFiles { root_dir }
+    }
+}
+
+#[async_trait::async_trait]
+impl<State: Clone + Send + Sync + 'static> tide::Middleware<State> for StaticFiles {
+    async fn handle(&self, req: Request<State>, next: Next<'_, State>) -> tide::Result {
+        let url_path = if req.url().path() == "/" {
+            "index.html"
+        } else {
+            req.url().path().trim_start_matches('/')
+        };
+
+        let static_dirs = vec![&self.root_dir, "public"];
+        let mut file_path = None;
+
+        for dir in &static_dirs {
+            let potential_path = Path::new(dir).join(url_path);
+            if async_std::fs::metadata(&potential_path).await.is_ok() {
+                file_path = Some(potential_path);
+                break;
+            }
+        }
+
+        if let Some(path) = file_path {
+            let mime_type = mime_guess::from_path(&path)
+                .first_or_octet_stream()
+                .to_string();
+            let file = fs::read_file_bytes(&path).unwrap();
+            let mut res = Response::new(StatusCode::Ok);
+            res.set_content_type(mime_type.as_str());
+            res.set_body(file);
+            Ok(res)
+        } else {
+            Ok(Response::new(StatusCode::NotFound))
+        }
     }
 }

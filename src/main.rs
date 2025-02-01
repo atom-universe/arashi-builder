@@ -4,18 +4,15 @@ mod utils;
 
 use clap::Parser;
 use cli::{Cli, Commands};
-use middleware::{DependencyAnalysis, Logger};
+use middleware::{DependencyAnalysis, Logger, StaticFiles};
 use utils::fs;
 
 async fn start_server(url: &str) {
     let mut app = tide::new();
-
-    // 获取当前工作目录
     let working_dir = fs::get_current_dir().unwrap().to_string_lossy().to_string();
 
-    app.with(Logger);
-    app.with(DependencyAnalysis::new(working_dir));
-    app.at("/").get(|_| async { Ok("Hello, Tide!") });
+    app.with(DependencyAnalysis::new(working_dir.clone()));
+    app.with(StaticFiles::new(working_dir));
 
     println!(
         "========== 启动 ==========\n URL: http://{} \n========== RUST ==========",
