@@ -1,16 +1,25 @@
-use crate::utils::transform::is_js_or_ts_file;
-use crate::utils::transform::process_imports;
-use crate::utils::transform::resolve_module_path;
+use crate::utils::prebuild::DepCache;
+use crate::utils::transform::{
+    is_js_or_ts_file, process_imports, resolve_module_path, transform_cjs_to_esm,
+};
+use async_std::path::Path;
+use std::sync::Arc;
 use tide::{Next, Request, Response, StatusCode};
+use tokio::sync::RwLock;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct DependencyAnalysis {
     root_dir: String,
+    dep_cache: Arc<RwLock<DepCache>>,
 }
 
 impl DependencyAnalysis {
-    pub fn new(root_dir: String) -> Self {
-        DependencyAnalysis { root_dir }
+    pub async fn new(root_dir: String) -> Self {
+        let dep_cache = Arc::new(RwLock::new(DepCache::new(Path::new(&root_dir)).await));
+        Self {
+            root_dir,
+            dep_cache,
+        }
     }
 }
 
@@ -20,14 +29,22 @@ impl<State: Clone + Send + Sync + 'static> tide::Middleware<State> for Dependenc
         let path = req.url().path().to_string();
 
         if path.starts_with("/@modules/") {
-            let module_path = path.trim_start_matches("/@modules/");
-            if let Some(file_path) = resolve_module_path(&self.root_dir, module_path).await {
-                match async_std::fs::read_to_string(&file_path).await {
-                    Ok(content) => {
-                        let mut res = Response::new(StatusCode::Ok);
-                        res.set_content_type("application/javascript");
-                        res.set_body(content);
-                        return Ok(res);
+            let module_name = path.trim_start_matches("/@modules/");
+
+            // 尝试获取或构建模块
+            if let Some(pkg_path) = resolve_module_path(&self.root_dir, module_name).await {
+                match self
+                    .dep_cache
+                    .write()
+                    .await
+                    .get_or_build(module_name, &pkg_path)
+                    .await
+                {
+                    Ok(cached_path) => {
+                        return Ok(Response::builder(200)
+                            .content_type("application/javascript")
+                            .body(async_std::fs::read_to_string(cached_path).await?)
+                            .build());
                     }
                     Err(_) => return Ok(Response::new(StatusCode::InternalServerError)),
                 }

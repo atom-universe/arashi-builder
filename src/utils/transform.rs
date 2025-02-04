@@ -14,7 +14,7 @@ pub fn transform_typescript(source: &str, is_tsx: bool) -> String {
 
     let parse_params = ParseParams {
         // 这里需要一个虚拟的文件路径，否则会报错（实际上好像没啥影响）
-        specifier: Url::parse("file:///dummy.ts").unwrap(),
+        specifier: Url::parse("file:///temporaryFile.ts").unwrap(),
         text_info: SourceTextInfo::new(source.into()),
         media_type,
         capture_tokens: true,
@@ -54,7 +54,7 @@ pub async fn process_imports(content: String) -> String {
     result
 }
 
-// 处理特殊标记的模块路径，找到其在 node_modules 中的具体位置
+/// 处理特殊标记的模块路径，找到其在 node_modules 中的具体位置
 pub async fn resolve_module_path(root_dir: &str, module_path: &str) -> Option<PathBuf> {
     // 将模块路径拆分为包名和子路径，这是为了处理一种复杂的情况：
     // 比如，react-dom/client 在 pnpm 下的位置是：
@@ -151,4 +151,72 @@ async fn resolve_package_entry(package_path: &Path, sub_path: Option<&str>) -> O
         "No entry file found for package: {}",
         package_path.display()
     );
+}
+
+/// 将 CommonJS 模块转换为 ESM 格式
+pub fn transform_cjs_to_esm(content: &str, module_name: &str) -> String {
+    // 添加 CommonJS 环境的模拟实现
+    let cjs_shim = r#"
+const process = {
+    env: {
+        NODE_ENV: 'development'
+    }
+};
+const exports = {};
+const module = { exports };
+"#;
+
+    if content.contains("process.env.NODE_ENV") {
+        // 提取 require 路径
+        if let Some(dev_path) = content
+            .lines()
+            .find(|line| line.contains("development.js"))
+            .and_then(|line| {
+                line.split("require('")
+                    .nth(1)
+                    .map(|s| s.split("')").next().unwrap_or(""))
+            })
+        {
+            let clean_path = dev_path.trim_start_matches("./");
+            return format!(
+                "{}\nexport default await import('/@modules/{}/{}')",
+                cjs_shim,
+                module_name.split('/').next().unwrap_or(module_name),
+                clean_path
+            );
+        }
+    }
+
+    // 其他情况的基本转换
+    let base_content = content
+        .replace("'use strict';", "")
+        .replace("module.exports =", "export default")
+        // 处理相对路径的 require
+        .replace(
+            "require('./",
+            &format!(
+                "await import('/@modules/{}/",
+                module_name.split('/').next().unwrap_or(module_name)
+            ),
+        )
+        .replace(
+            "require(\"./",
+            &format!(
+                "await import(\"/@modules/{}/",
+                module_name.split('/').next().unwrap_or(module_name)
+            ),
+        )
+        // 处理第三方模块的 require
+        .replace("require(\"", "await import(\"/@modules/")
+        .replace("require('", "await import('/@modules/");
+
+    // 如果包含任何 CommonJS 相关的变量，添加 shim
+    if content.contains("process.env")
+        || content.contains("exports.")
+        || content.contains("module.exports")
+    {
+        format!("{}{}", cjs_shim, base_content)
+    } else {
+        base_content
+    }
 }

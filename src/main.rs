@@ -8,13 +8,14 @@ use crate::middleware::tsx_transform::TypescriptTransform;
 use clap::Parser;
 use cli::{Cli, Commands};
 use utils::fs;
+// use utils::prebuild;
 
 async fn start_server(url: &str) {
     let mut app = tide::new();
     let working_dir = fs::get_current_dir().unwrap().to_string_lossy().to_string();
 
-    // 1. 处理 node_modules 和依赖分析
-    app.with(DependencyAnalysis::new(working_dir.clone()));
+    // 1. 按需处理 node_modules 和依赖分析
+    app.with(DependencyAnalysis::new(working_dir.clone()).await);
     // 2. TypeScript 转换
     app.with(TypescriptTransform::new(working_dir.clone()));
     // 3. 静态文件服务
@@ -24,7 +25,7 @@ async fn start_server(url: &str) {
         "========== 启动 ==========\n URL: http://{} \n========== RUST ==========",
         url
     );
-    app.listen(url).await.unwrap();
+    app.listen(url).await;
 }
 
 #[async_std::main]
