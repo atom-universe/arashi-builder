@@ -13,9 +13,12 @@ async fn start_server(url: &str) {
     let mut app = tide::new();
     let working_dir = fs::get_current_dir().unwrap().to_string_lossy().to_string();
 
+    // 1. 处理 node_modules 和依赖分析
     app.with(DependencyAnalysis::new(working_dir.clone()));
-    app.with(StaticFiles::new(working_dir.clone()));
+    // 2. TypeScript 转换
     app.with(TypescriptTransform::new(working_dir.clone()));
+    // 3. 静态文件服务
+    app.with(StaticFiles::new(working_dir.clone()));
 
     println!(
         "========== 启动 ==========\n URL: http://{} \n========== RUST ==========",

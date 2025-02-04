@@ -15,7 +15,7 @@ impl StaticFiles {
 
 #[async_trait::async_trait]
 impl<State: Clone + Send + Sync + 'static> tide::Middleware<State> for StaticFiles {
-    async fn handle(&self, req: Request<State>, _next: Next<'_, State>) -> tide::Result {
+    async fn handle(&self, req: Request<State>, next: Next<'_, State>) -> tide::Result {
         let url_path = if req.url().path() == "/" {
             "index.html"
         } else {

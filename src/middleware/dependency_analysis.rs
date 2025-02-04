@@ -1,52 +1,49 @@
-use crate::utils::fs;
-use serde_yaml;
-use std::collections::HashMap;
-use tide::{Next, Request};
+use crate::utils::transform::is_js_or_ts_file;
+use crate::utils::transform::process_imports;
+use crate::utils::transform::resolve_module_path;
+use tide::{Next, Request, Response, StatusCode};
 
 #[derive(Debug, Clone)]
 pub struct DependencyAnalysis {
-    pub working_dir: String,
+    root_dir: String,
 }
 
 impl DependencyAnalysis {
-    pub fn new(working_dir: String) -> Self {
-        DependencyAnalysis { working_dir }
+    pub fn new(root_dir: String) -> Self {
+        DependencyAnalysis { root_dir }
     }
 }
-
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PnpmLock {
-    packages: HashMap<String, PackageInfo>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct PackageInfo {}
 
 #[async_trait::async_trait]
 impl<State: Clone + Send + Sync + 'static> tide::Middleware<State> for DependencyAnalysis {
     async fn handle(&self, req: Request<State>, next: Next<'_, State>) -> tide::Result {
-        let mut pkg_name_2_pkg_path = HashMap::<String, String>::new();
-        let path_string = std::path::Path::new(&self.working_dir)
-            .join("pnpm-lock.yaml")
-            .to_string_lossy()
-            .to_string();
+        let path = req.url().path().to_string();
 
-        let content = fs::read_file_content(&path_string).unwrap().to_string();
-        let lock: PnpmLock = serde_yaml::from_str(&content).unwrap();
-
-        for (package_name, _) in lock.packages {
-            let module_name = package_name.split('@').collect::<Vec<&str>>()[0];
-            let subpath = format!(
-                "node_modules/.pnpm/{}/node_modules/{}",
-                package_name, module_name
-            );
-
-            let pkg_path = std::path::Path::new(&self.working_dir).join(subpath);
-            pkg_name_2_pkg_path.insert(package_name, pkg_path.to_string_lossy().to_string());
+        if path.starts_with("/@modules/") {
+            let module_path = path.trim_start_matches("/@modules/");
+            if let Some(file_path) = resolve_module_path(&self.root_dir, module_path).await {
+                match async_std::fs::read_to_string(&file_path).await {
+                    Ok(content) => {
+                        let mut res = Response::new(StatusCode::Ok);
+                        res.set_content_type("application/javascript");
+                        res.set_body(content);
+                        return Ok(res);
+                    }
+                    Err(_) => return Ok(Response::new(StatusCode::InternalServerError)),
+                }
+            }
+            return Ok(Response::new(StatusCode::NotFound));
         }
 
-        let response = next.run(req).await;
+        let mut response = next.run(req).await;
+        if is_js_or_ts_file(&path) {
+            if let Some(body) = response.take_body().into_string().await.ok() {
+                let processed_content = process_imports(body).await;
+                response.set_content_type("application/javascript");
+                response.set_body(processed_content);
+            }
+        }
+
         Ok(response)
     }
 }
