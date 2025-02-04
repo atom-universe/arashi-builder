@@ -36,8 +36,11 @@ impl<State: Clone + Send + Sync + 'static> tide::Middleware<State> for Dependenc
         }
 
         let mut response = next.run(req).await;
+
         if is_js_or_ts_file(&path) {
             if let Some(body) = response.take_body().into_string().await.ok() {
+                // 当一个文件中有 import，将其中第三方依赖的导入路径特殊标记一下
+                // 后续真正请求这些第三方模块的时候，识别到这些标记，就走上面的代码逻辑
                 let processed_content = process_imports(body).await;
                 response.set_content_type("application/javascript");
                 response.set_body(processed_content);
