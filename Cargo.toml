@@ -13,9 +13,15 @@ async-std = { version = "1.10", features = ["attributes"] }
 async-trait = "0.1"
 clap = { version = "4.5", features = ["derive"] }
 serde = { version = "1.0", features = ["derive"] }
-deno_ast = { version = "0.34", features = ["transpiling"] }
+# deno_ast = { version = "0.34", features = ["transpiling"] }
 url = "2.5.4"
 regex = "1.11.1"
 serde_json = "1.0.138"
 tokio = { version = "1", features = ["sync"] }
 mime_guess = "2.0"
+oxc_parser = "0.48.2"
+oxc_span = "0.48.2"
+oxc_allocator = "0.48.2"
+oxc_codegen = "0.48.2"
+oxc_semantic = "0.48.2"
+oxc_transformer = "0.48.2"

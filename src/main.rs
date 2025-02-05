@@ -2,6 +2,7 @@ mod cli;
 mod middleware;
 mod utils;
 
+use crate::middleware::css_transform::CssTransform;
 use crate::middleware::dependency_analysis::DependencyAnalysis;
 use crate::middleware::static_file::StaticFiles;
 use crate::middleware::tsx_transform::TypescriptTransform;
@@ -18,13 +19,16 @@ async fn start_server(url: &str) {
     app.with(DependencyAnalysis::new(working_dir.clone()).await);
     // 2. TypeScript 转换
     app.with(TypescriptTransform::new(working_dir.clone()));
-    // 3. 静态文件服务
+    // 3. CSS 转换
+    app.with(CssTransform::new(working_dir.clone()));
+    // 4. 静态文件服务
     app.with(StaticFiles::new(working_dir.clone()));
 
     println!(
         "========== 启动 ==========\n URL: http://{} \n========== RUST ==========",
         url
     );
+    // 这里必须要 await 一下，不然 cli 命令之后就结束了不会等待阻塞
     app.listen(url).await;
 }
 

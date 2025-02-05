@@ -44,6 +44,10 @@ match command {
 ## 2. 模式匹配
 
 ### 2.1 match 表达式
+
+个人感觉这就是 Rust 严谨（麻烦）的一点，要把每种可能的情况都定义清楚。
+> 如果不想讨论每种情况，可以用 if let 表达式
+
 ```rust
 // 1. 基本匹配
 let number = 13;
@@ -76,6 +80,9 @@ match number {
 ```
 
 ### 2.2 if let 语法
+
+语法就是 `if let [枚举] = 表达式 {} else {}`，也就是当某个表达式（不）满足某个枚举条件的时候，执行对应的内容。
+
 ```rust
 // 1. 基本用法 - 只关心一种模式
 let config = Some(3);
@@ -138,21 +145,6 @@ let (Some(x), Some(y)) = (get_x(), get_y()) else {
 };
 ```
 
-### 2.5 模式匹配的最佳实践
-1. **选择合适的匹配方式**
-   - 只关心一种情况：使用 `if let`
-   - 需要处理所有情况：使用 `match`
-   - 需要提前返回：考虑 `let else`
-
-2. **代码可读性**
-   - 模式不要过于复杂
-   - 使用适当的缩进和格式
-   - 添加必要的注释说明
-
-3. **性能考虑**
-   - `match` 是穷尽的，编译器可以优化
-   - `if let` 可能更高效（只关心一种情况时）
-
 ## 3. 模块系统
 
 ### 3.1 基本概念
@@ -183,6 +175,10 @@ mod app {
 ## 4. 错误处理
 
 ### 4.1 Result 类型
+
+什么时候会出现 Result 类型? 
+个人理解是在IO的时候会出现得比较多。
+
 ```rust
 // 1. 基本使用
 fn read_file(path: &str) -> Result<String, std::io::Error> {
@@ -191,13 +187,23 @@ fn read_file(path: &str) -> Result<String, std::io::Error> {
 
 // 2. ? 运算符
 fn process_file(path: &str) -> Result<(), std::io::Error> {
-    let content = read_file(path)?;  // 错误自动返回
+    // ? 运算符相当于:
+    // let content = match read_file(path) {
+    //     Ok(content) => content,
+    //     Err(e) => return Err(e)
+    // };
+    // 如果 read_file 返回 Ok，则 content 获得其中的值
+    // 如果返回 Err，则直接从当前函数返回该错误
+    let content = read_file(path)?;
     println!("{}", content);
     Ok(())
 }
 ```
 
 ## 5. 特征（Trait）
+
+差不多相当于 `interface`
+
 
 ### 5.1 基本使用
 ```rust
@@ -217,6 +223,9 @@ impl Handler for MyHandler {
 ## 6. 异步编程
 
 ### 6.1 基础概念
+
+语法上和 JS 类似
+
 ```rust
 // 1. async 函数
 async fn fetch_data() -> Result<String, Error> {
@@ -229,43 +238,84 @@ async fn process() {
 }
 ```
 
-### 6.2 实际应用（进阶）
+
+## 7. 并发控制
+
+### 7.1 锁与并发
+
+由于做前端开发更多，所以其实对多线程并不是很熟悉。。。
+
+1. **为什么需要锁？**
 ```rust
-// 在我们的项目中的异步处理
-async fn handle(&self, req: Request<State>, next: Next<'_, State>) -> tide::Result {
-    // 处理请求
-    let response = next.run(req).await;
-    // 处理响应
-    Ok(response)
+// 一个共享的计数器
+// Mutex是互斥锁，Arc是跨线程的智能指针
+let counter = Arc::new(Mutex::new(0));
+let counter_clone = counter.clone();
+
+// 在另一个线程中修改它
+std::thread::spawn(move || {
+    *counter_clone.lock().unwrap() += 1;
+});
+```
+
+2. **同步锁 vs 异步锁**
+```rust
+// 同步锁会阻塞线程
+let lock = std::sync::RwLock::new(data);
+// 调用 write 方法的时候，会获得一个【写锁】，有写锁的线程可以修改变量
+let guard = lock.write().unwrap();  // 线程会在这里等待
+// 其他线程完全停止，直到获得锁
+
+// 异步锁不会阻塞线程
+let lock = tokio::sync::RwLock::new(data);
+let guard = lock.write().await;  // 线程可以去做其他事
+// 当前任务暂停，线程可以执行其他任务
+```
+
+3. **await vs RwLock 的区别**
+
+对于异步锁这个概念，说实话我感觉有些困惑，因为根据我的 JS 经验来看，await 就已经在发挥锁的能力了。
+> 个人理解：锁是针对于线程的，await 是针对任务的
+
+```rust
+// await 是任务级别的暂停（任务，就 JS 的经验来看，当成函数调用看就行了）
+async fn process_data() {
+    let result = fetch_data().await;  // 暂停当前任务，等待 IO
+    // 这里的暂停不影响其他任务使用 result
+}
+
+// RwLock 是跨任务的数据共享
+async fn handle_request(shared_cache: Arc<RwLock<Cache>>) {
+    let cache = shared_cache.write().await;  // 确保多个任务不会同时写入
+    cache.insert(key, value);
+    // 其他任务必须等待写操作完成
 }
 ```
 
-## 7. 并发控制（进阶）
+### 7.2 实际应用场景
 
-### 7.1 锁的使用
+两个请求并发过来，读取内存数据，这时候读的都是50，然后一个执行+1，另一个执行-1，分别得到51和49，
+再写到内存中，这时候问题就来了，数据对不上了！
+
 ```rust
-// 1. 同步锁
-let lock = std::sync::RwLock::new(data);
-let guard = lock.write().unwrap();
+// 在我们的项目中：依赖构建的并发控制
+pub struct DepCache {
+    cache_dir: PathBuf,
+    building: HashSet<String>,  // 正在构建的包集合
+    metadata: HashMap<String, String>,  // 缓存元数据
+}
 
-// 2. 异步锁（更复杂）
-let lock = tokio::sync::RwLock::new(data);
-let guard = lock.write().await;
+impl DepCache {
+    async fn get_or_build(&mut self, pkg_name: &str) -> Result<PathBuf> {
+        // 1. 多个请求可能同时要求构建同一个包
+        // 2. await 只能保证当前任务的异步等待
+        // 3. RwLock 确保不会重复构建同一个包
+        if self.building.contains(pkg_name) {
+            // 等待其他任务完成构建
+            while self.building.contains(pkg_name) {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        }
+    }
+}
 ```
-
-## 学习建议
-
-1. **循序渐进**
-   - 先掌握基础语法和所有权概念
-   - 理解模块系统和错误处理
-   - 逐步深入特征和异步编程
-
-2. **实践方式**
-   - 从小型功能开始
-   - 多看编译器错误提示
-   - 参考标准库文档
-
-3. **常见陷阱**
-   - 所有权和借用规则
-   - 生命周期标注
-   - 异步代码的类型约束

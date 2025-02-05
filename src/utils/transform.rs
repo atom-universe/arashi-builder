@@ -1,32 +1,100 @@
 use async_std::path::{Path, PathBuf};
 use async_std::stream::StreamExt;
-use deno_ast::{MediaType, ParseParams, SourceTextInfo};
+use oxc_allocator::Allocator;
+use oxc_codegen::CodeGenerator;
+use oxc_parser::{ParseOptions, Parser, ParserReturn};
+use oxc_semantic::SemanticBuilder;
+use oxc_span::SourceType;
+use oxc_transformer::{JsxOptions, JsxRuntime, TransformOptions, Transformer};
 use regex::Regex;
 use serde_json;
-use url::Url;
 
+/// 转换 ts 和 tsx => js
 pub fn transform_typescript(source: &str, is_tsx: bool) -> String {
-    let media_type = if is_tsx {
-        MediaType::Tsx
+    // 设置内存分配器
+    let allocator = Allocator::default();
+    let source_type = if is_tsx {
+        SourceType::tsx()
     } else {
-        MediaType::TypeScript
+        SourceType::ts()
     };
 
-    let parse_params = ParseParams {
-        // 这里需要一个虚拟的文件路径，否则会报错（实际上好像没啥影响）
-        specifier: Url::parse("file:///temporaryFile.ts").unwrap(),
-        text_info: SourceTextInfo::new(source.into()),
-        media_type,
-        capture_tokens: true,
-        scope_analysis: false,
-        maybe_syntax: None,
-    };
-
-    match deno_ast::parse_module(parse_params) {
-        Ok(parsed) => parsed.transpile(&Default::default()).unwrap().text,
-        Err(e) => format!("Error: {:?}", e),
+    // 解析源码
+    let ParserReturn {
+        mut program,
+        errors,
+        panicked,
+        ..
+    } = Parser::new(&allocator, source, source_type)
+        .with_options(ParseOptions {
+            parse_regular_expression: true,
+            ..ParseOptions::default()
+        })
+        .parse();
+    // println!("ast: \n{:?}\n", program);
+    if panicked || !errors.is_empty() {
+        return format!("Parse Error: {:?}", errors);
     }
+
+    let ret = SemanticBuilder::new()
+        // Estimate transformer will triple scopes, symbols, references
+        .with_excess_capacity(2.0)
+        .build(&program);
+    if !ret.errors.is_empty() {
+        println!("Semantic Errors:");
+        for error in ret.errors {
+            let error = error.with_source_code(source.to_string());
+            println!("{error:?}");
+        }
+    }
+
+    let (symbols, scopes) = ret.semantic.into_symbol_table_and_scope_tree();
+    let transform_options = TransformOptions {
+        jsx: JsxOptions {
+            development: false,           // 使用生产模式
+            runtime: JsxRuntime::Classic, // 使用经典模式，生成 React.createElement
+            ..JsxOptions::default()
+        },
+        ..TransformOptions::enable_all()
+    };
+
+    let ret = Transformer::new(
+        &allocator,
+        std::path::Path::new("virtual.tsx"),
+        &transform_options,
+    )
+    .build_with_symbols_and_scopes(symbols, scopes, &mut program);
+    if !ret.errors.is_empty() {
+        println!("Transformer Errors:");
+        for error in ret.errors {
+            let error = error.with_source_code(source.to_string());
+            println!("{error:?}");
+        }
+    }
+    CodeGenerator::new().build(&program).code
+    // let result = CodeGenerator::new()
+    //     .with_options(CodegenOptions {
+    //         ..CodegenOptions::default()
+    //     })
+    //     .build(&program);
+    // codegen.set_source_type(source_type); // 设置源码类型，让它知道要处理 JSX
+    // let result = codegen.build();
+
+    // result.code
 }
+
+// pub async fn transform_typescript(content: &str, is_tsx: bool) -> String {
+//     let result = esbuild::transform(
+//         content,
+//         TransformOptions {
+//             loader: if is_tsx { "tsx" } else { "ts" },
+//             target: Some("es2020"),
+//             format: Some(Format::Esm),
+//             ..Default::default()
+//         },
+//     )?;
+//     result.code
+// }
 
 pub fn is_js_or_ts_file(path: &str) -> bool {
     path.ends_with(".js")
@@ -151,72 +219,4 @@ async fn resolve_package_entry(package_path: &Path, sub_path: Option<&str>) -> O
         "No entry file found for package: {}",
         package_path.display()
     );
-}
-
-/// 将 CommonJS 模块转换为 ESM 格式
-pub fn transform_cjs_to_esm(content: &str, module_name: &str) -> String {
-    // 添加 CommonJS 环境的模拟实现
-    let cjs_shim = r#"
-const process = {
-    env: {
-        NODE_ENV: 'development'
-    }
-};
-const exports = {};
-const module = { exports };
-"#;
-
-    if content.contains("process.env.NODE_ENV") {
-        // 提取 require 路径
-        if let Some(dev_path) = content
-            .lines()
-            .find(|line| line.contains("development.js"))
-            .and_then(|line| {
-                line.split("require('")
-                    .nth(1)
-                    .map(|s| s.split("')").next().unwrap_or(""))
-            })
-        {
-            let clean_path = dev_path.trim_start_matches("./");
-            return format!(
-                "{}\nexport default await import('/@modules/{}/{}')",
-                cjs_shim,
-                module_name.split('/').next().unwrap_or(module_name),
-                clean_path
-            );
-        }
-    }
-
-    // 其他情况的基本转换
-    let base_content = content
-        .replace("'use strict';", "")
-        .replace("module.exports =", "export default")
-        // 处理相对路径的 require
-        .replace(
-            "require('./",
-            &format!(
-                "await import('/@modules/{}/",
-                module_name.split('/').next().unwrap_or(module_name)
-            ),
-        )
-        .replace(
-            "require(\"./",
-            &format!(
-                "await import(\"/@modules/{}/",
-                module_name.split('/').next().unwrap_or(module_name)
-            ),
-        )
-        // 处理第三方模块的 require
-        .replace("require(\"", "await import(\"/@modules/")
-        .replace("require('", "await import('/@modules/");
-
-    // 如果包含任何 CommonJS 相关的变量，添加 shim
-    if content.contains("process.env")
-        || content.contains("exports.")
-        || content.contains("module.exports")
-    {
-        format!("{}{}", cjs_shim, base_content)
-    } else {
-        base_content
-    }
 }

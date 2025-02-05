@@ -1,4 +1,8 @@
 use async_std::path::{Path, PathBuf};
+// use esbuild::*;
+use oxc_allocator::Allocator;
+use oxc_parser::{Parser, ParserReturn};
+use oxc_span::SourceType;
 use std::collections::{HashMap, HashSet};
 use std::process::Command;
 use tide::Result;
@@ -10,6 +14,7 @@ pub struct DepCache {
     building: HashSet<String>,         // 正在构建的包
 }
 
+/// TODO:想要做成预构建，但是现在是请求的时候按需构建。。。
 impl DepCache {
     pub async fn new(root_dir: &Path) -> Self {
         let cache_dir = root_dir.join("node_modules/.arashi");
@@ -73,6 +78,29 @@ impl DepCache {
         .await
         .unwrap();
 
+        // // 读取源码并解析
+        // let source = async_std::fs::read_to_string(pkg_path).await.unwrap();
+        // let allocator = Allocator::default();
+        // let source_type = SourceType::from_path(pkg_path).unwrap();
+
+        // let ParserReturn {
+        //     mut program,
+        //     errors,
+        //     panicked,
+        //     ..
+        // } = Parser::new(&allocator, &source, source_type).parse();
+
+        // if panicked || !errors.is_empty() {
+        //     panic!("Parse Error: {:?}", errors);
+        // }
+
+        // // 生成代码
+        // let result = CodeGenerator::new().build(&program);
+
+        // // 写入文件
+        // let outfile = outdir.join(format!("{}.js", pkg_name));
+        // async_std::fs::write(&outfile, result.code).await.unwrap();
+
         self.metadata
             .insert(pkg_name.to_string(), format!("deps/{}.js", pkg_name));
     }
@@ -80,4 +108,19 @@ impl DepCache {
     pub fn get_cached_path(&self, pkg_name: &str) -> Option<PathBuf> {
         self.metadata.get(pkg_name).map(|p| self.cache_dir.join(p))
     }
+
+    // async fn build_dependency(&self, pkg_name: &str, pkg_path: &Path) -> Result<PathBuf> {
+    //     let outdir = self.cache_dir.join("deps");
+    //     let outfile = outdir.join(format!("{}.js", pkg_name));
+
+    //     // 使用 OXC 进行转换和打包
+    //     let source = async_std::fs::read_to_string(pkg_path).await?;
+    //     let ret = Transformer::new(&allocator, "virtual.ts", &transform_options)
+    //         .build_with_symbols_and_scopes(symbols, scopes, &mut program);
+
+    //     let result = transformer.transform(&source)?;
+    //     async_std::fs::write(&outfile, result.code).await?;
+
+    //     Ok(outfile)
+    // }
 }

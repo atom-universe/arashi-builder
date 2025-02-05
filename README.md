@@ -27,6 +27,7 @@
    // 三个核心中间件
    app.with(DependencyAnalysis::new(working_dir.clone()).await);  // 依赖处理
    app.with(TypescriptTransform::new(working_dir.clone()));       // TS 转换
+   app.with(CssTransform::new(working_dir.clone()));              // 处理 CSS
    app.with(StaticFiles::new(working_dir.clone()));              // 静态文件
    ```
 
@@ -39,26 +40,9 @@
 
 | 环境 | Vite | Arashi |
 |------|------|--------|
-| Dev | • 启动时预构建依赖 (.vite 缓存)<br>• 原生 ESM + 按需编译<br>• 完整模块图分析<br>• 精确的 HMR + 状态保持<br>• esbuild 即时转换 TS/JSX<br>• CSS 即时处理 + HMR<br>• 智能资源导入<br>• 插件系统 + 高度可配置<br>• 精确的错误提示和源码映射 | • 按需构建依赖 (.arashi 缓存) ✅<br>• 原生 ESM + 基础路径重写 ✅<br>• 简单路径匹配 <br>• 不支持 HMR ❌<br>• deno_ast 转换 TS/JSX ✅<br>• 基础静态文件服务 <br>• 无插件系统 <br>• 硬编码配置 <br>• 基础错误提示  |
+| Dev | • 启动时预构建依赖 (.vite 缓存)<br>• 原生 ESM + 按需编译<br>• 完整模块图分析<br>• 精确的 HMR<br>• 状态保持<br>• esbuild 即时转换 TS/JSX<br>• CSS 即时处理<br>• CSS HMR<br>• 智能资源导入<br>• 插件系统 + 高度可配置<br>• 精确的错误提示和源码映射 |  • 按需构建依赖 (.arashi 缓存) ✅<br>• 原生 ESM + 基础路径重写 ✅<br>• 简单路径匹配 <br>• 不支持 HMR ❌<br>• 不支持状态保持 ❌<br>• deno_ast 转换 TS/JSX ✅<br>• CSS 即时处理 ✅<br>• 基础静态文件服务 <br>• 无插件系统 ❌<br>• 硬编码配置 <br>• 基础错误提示  |
 | Prod | • Rollup 全量打包<br>• 代码分割 + 智能分包<br>• 资源优化 + CDN 集成<br>• CSS 提取 + 压缩<br>• 产物体积优化<br>• 环境变量注入<br>• 完整的构建管线 | • 不支持生产构建 ❌<br> |
 
-### 主要差异说明
-
-1. **依赖处理策略**
-   - Vite: 启动时预构建常用依赖，减少冷启动时的延迟
-   - Arashi: 完全按需构建，首次加载较慢但启动更快
-
-2. **模块处理**
-   - Vite: 完整的模块图分析，支持各种导入方式
-   - Arashi: 基础的路径重写，仅支持标准 ESM
-
-3. **开发体验**
-   - Vite: 完整的 HMR 支持，保持应用状态
-   - Arashi: 仅支持完整页面刷新
-
-4. **工具链集成**
-   - Vite: 插件系统，支持各种工具集成
-   - Arashi: 固定的工具选择（esbuild + deno_ast）
 
 ### 冷启动流程对比
 
@@ -100,4 +84,5 @@ graph TB
 3. **缓存策略**
    - Vite: 启动时建立完整缓存
    - Arashi: 按需构建并缓存
+
 
